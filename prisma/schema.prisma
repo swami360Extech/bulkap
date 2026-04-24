@@ -1,0 +1,439 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── TENANCY ──────────────────────────────────────────────────────────────────
+
+model Tenant {
+  id              String   @id @default(uuid())
+  name            String
+  slug            String   @unique
+  oracleBaseUrl   String
+  oracleUsername  String
+  oraclePassword  String
+  legislationCode String   @default("US")
+  defaultCurrency String   @default("USD")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users         User[]
+  vendors       Vendor[]
+  invoices      Invoice[]
+  businessUnits BusinessUnit[]
+  fbdiBatches   FBDIBatch[]
+}
+
+model BusinessUnit {
+  id              String @id @default(uuid())
+  tenantId        String
+  tenant          Tenant @relation(fields: [tenantId], references: [id])
+  oracleBuId      String
+  name            String
+  ledgerCurrency  String @default("USD")
+  legislationCode String @default("US")
+
+  invoices Invoice[]
+
+  @@unique([tenantId, oracleBuId])
+  @@index([tenantId])
+}
+
+// ─── USERS ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  AP_MANAGER
+  AP_CLERK
+  APPROVER
+  VIEWER
+}
+
+model User {
+  id             String    @id @default(uuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id])
+  email          String    @unique
+  name           String
+  role           UserRole  @default(AP_CLERK)
+  oraclePersonId String?
+  passwordHash   String
+  createdAt      DateTime  @default(now())
+  lastLoginAt    DateTime?
+
+  assignedExceptions Exception[]  @relation("AssignedTo")
+  resolvedExceptions Exception[]  @relation("ResolvedBy")
+  auditEvents        AuditEvent[]
+
+  @@index([tenantId])
+}
+
+// ─── VENDORS ──────────────────────────────────────────────────────────────────
+
+model Vendor {
+  id                String    @id @default(uuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id])
+  oracleSupplierId  String
+  oracleSupplierNum String
+  name              String
+  taxRegistration   String?
+  defaultCurrency   String    @default("USD")
+  paymentTerms      String?
+  country           String?
+  exceptionRate     Float     @default(0)
+  avgCycleTimeDays  Float?
+  lastInvoiceAt     DateTime?
+
+  invoices     Invoice[]
+  bankAccounts VendorBankAccount[]
+
+  @@unique([tenantId, oracleSupplierId])
+  @@index([tenantId])
+}
+
+model VendorBankAccount {
+  id                String    @id @default(uuid())
+  vendorId          String
+  vendor            Vendor    @relation(fields: [vendorId], references: [id])
+  oracleBankAcctId  String?
+  bankName          String
+  accountNumberMask String
+  routingNumber     String?
+  iban              String?
+  swift             String?
+  verified          Boolean   @default(false)
+  verifiedAt        DateTime?
+  verifiedByUserId  String?
+  changeRequestedAt DateTime?
+  changeStatus      String?
+
+  @@index([vendorId])
+}
+
+// ─── INVOICES ─────────────────────────────────────────────────────────────────
+
+enum InvoiceType {
+  STANDARD_PO
+  NON_PO_SERVICE
+  CREDIT_MEMO
+  DEBIT_MEMO
+  PREPAYMENT
+  RECURRING
+  FREIGHT
+  CAPITAL_EXPENDITURE
+  INTERCOMPANY
+  FOREIGN_CURRENCY
+  TAX_ONLY
+  UNKNOWN
+}
+
+enum InvoiceStatus {
+  RECEIVED
+  CLASSIFYING
+  EXTRACTING
+  REVIEW_REQUIRED
+  VALIDATING
+  VALIDATION_FAILED
+  READY_FOR_SUBMISSION
+  SUBMITTING
+  SUBMITTED
+  ORACLE_PROCESSING
+  ORACLE_ERROR
+  APPROVED
+  PAID
+  CANCELLED
+  REJECTED
+  DUPLICATE
+}
+
+enum SourceChannel {
+  MANUAL_UPLOAD
+  EMAIL
+  SFTP
+  API
+  EDI
+}
+
+model Invoice {
+  id                   String        @id @default(uuid())
+  tenantId             String
+  tenant               Tenant        @relation(fields: [tenantId], references: [id])
+  buId                 String?
+  businessUnit         BusinessUnit? @relation(fields: [buId], references: [id])
+  vendorId             String?
+  vendor               Vendor?       @relation(fields: [vendorId], references: [id])
+
+  sourceChannel        SourceChannel
+  sourceRef            String?
+  documentUrl          String
+  documentMimeType     String
+  originalFilename     String
+
+  invoiceType          InvoiceType   @default(UNKNOWN)
+  classificationConf   Float?
+
+  externalInvoiceNum   String?
+  invoiceDate          DateTime?
+  dueDate              DateTime?
+  currency             String?
+  grossAmount          Decimal?      @db.Decimal(18, 4)
+  taxAmount            Decimal?      @db.Decimal(18, 4)
+  netAmount            Decimal?      @db.Decimal(18, 4)
+  poNumber             String?
+  paymentTerms         String?
+
+  earlyPayDiscountPct  Decimal?      @db.Decimal(5, 4)
+  earlyPayDiscountDate DateTime?
+
+  status               InvoiceStatus @default(RECEIVED)
+  extractionAvgConf    Float?
+  reviewRequired       Boolean       @default(false)
+
+  oracleInvoiceId      String?
+  oracleInvoiceNum     String?
+  oracleStatus         String?
+  oracleHoldReason     String?
+  fbdiBatchId          String?
+  submittedAt          DateTime?
+  oracleApprovedAt     DateTime?
+  oraclePaidAt         DateTime?
+  oraclePaymentRef     String?
+
+  contentHash          String?
+  semanticHash         String?
+
+  receivedAt           DateTime      @default(now())
+  extractedAt          DateTime?
+  validatedAt          DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  fields      InvoiceField[]
+  lines       InvoiceLine[]
+  validations InvoiceValidation[]
+  exceptions  Exception[]
+  auditEvents AuditEvent[]
+  fbdiBatch   FBDIBatch?          @relation(fields: [fbdiBatchId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, vendorId])
+  @@index([tenantId, receivedAt])
+  @@index([contentHash])
+  @@index([oracleInvoiceId])
+}
+
+model InvoiceField {
+  id               String    @id @default(uuid())
+  invoiceId        String
+  invoice          Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  fieldName        String
+  extractedValue   String?
+  confidence       Float
+  boundingBox      Json?
+  manuallyReviewed Boolean   @default(false)
+  confirmedValue   String?
+  confirmedAt      DateTime?
+  confirmedBy      String?
+
+  @@unique([invoiceId, fieldName])
+  @@index([invoiceId])
+}
+
+enum LineMatchStatus {
+  MATCHED
+  TOLERANCE_BREACH
+  PRICE_MISMATCH
+  QTY_MISMATCH
+  RECEIPT_PENDING
+  NO_PO
+}
+
+model InvoiceLine {
+  id              String           @id @default(uuid())
+  invoiceId       String
+  invoice         Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  lineNumber      Int
+  description     String?
+  quantity        Decimal?         @db.Decimal(18, 4)
+  unitPrice       Decimal?         @db.Decimal(18, 4)
+  lineAmount      Decimal          @db.Decimal(18, 4)
+  taxCode         String?
+  taxAmount       Decimal?         @db.Decimal(18, 4)
+  poNumber        String?
+  poLineNumber    Int?
+  oraclePoLineId  String?
+  oraclePoShipId  String?
+  receiptNumber   String?
+  oracleReceiptId String?
+  glAccount       String?
+  projectId       String?
+  taskId          String?
+  expenditureType String?
+  matchStatus     LineMatchStatus?
+  oracleLineId    String?
+
+  @@index([invoiceId])
+}
+
+// ─── VALIDATION ───────────────────────────────────────────────────────────────
+
+enum ValidationCheck {
+  SUPPLIER_EXISTS
+  SUPPLIER_ACTIVE
+  SUPPLIER_SITE_VALID
+  PO_EXISTS
+  PO_OPEN
+  PO_AMOUNT_SUFFICIENT
+  RECEIPT_EXISTS
+  THREE_WAY_MATCH
+  GL_ACCOUNT_VALID
+  TAX_CODE_VALID
+  PERIOD_OPEN
+  CURRENCY_VALID
+  DUPLICATE_CHECK
+  CROSS_BU_DUPLICATE
+  AMOUNT_ANOMALY
+  BANK_CHANGE_DETECTED
+}
+
+enum ValidationResult {
+  PASS
+  FAIL
+  WARNING
+  SKIPPED
+}
+
+model InvoiceValidation {
+  id             String           @id @default(uuid())
+  invoiceId      String
+  invoice        Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  check          ValidationCheck
+  result         ValidationResult
+  message        String?
+  oraclePayload  Json?
+  oracleResponse Json?
+  checkedAt      DateTime         @default(now())
+
+  @@index([invoiceId])
+}
+
+// ─── EXCEPTIONS ───────────────────────────────────────────────────────────────
+
+enum ExceptionType {
+  DUPLICATE
+  CROSS_BU_DUPLICATE
+  PO_MISMATCH
+  PO_AMOUNT_EXCEEDED
+  RECEIPT_PENDING
+  GL_INVALID
+  TAX_ERROR
+  BANK_ACCOUNT_CHANGE
+  AMOUNT_ANOMALY
+  SUPPLIER_INACTIVE
+  PERIOD_CLOSED
+  LOW_CONFIDENCE_EXTRACTION
+  ORACLE_IMPORT_ERROR
+}
+
+enum ExceptionSeverity {
+  BLOCKING
+  WARNING
+  INFORMATIONAL
+}
+
+enum ExceptionStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  WAIVED
+  AUTO_RESOLVED
+}
+
+model Exception {
+  id               String            @id @default(uuid())
+  invoiceId        String
+  invoice          Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  type             ExceptionType
+  severity         ExceptionSeverity
+  status           ExceptionStatus   @default(OPEN)
+  description      String
+  oracleHoldName   String?
+  aiSuggestion     String?
+  assignedTo       String?
+  assignedUser     User?             @relation("AssignedTo", fields: [assignedTo], references: [id])
+  assignedAt       DateTime?
+  resolutionAction String?
+  resolvedBy       String?
+  resolvedByUser   User?             @relation("ResolvedBy", fields: [resolvedBy], references: [id])
+  resolvedAt       DateTime?
+  waivedReason     String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([invoiceId])
+  @@index([status, severity])
+  @@index([assignedTo])
+}
+
+// ─── FBDI BATCHES ─────────────────────────────────────────────────────────────
+
+enum BatchStatus {
+  ASSEMBLING
+  UPLOADED_TO_UCM
+  JOB_SUBMITTED
+  JOB_RUNNING
+  JOB_COMPLETED
+  JOB_FAILED
+  PARTIALLY_FAILED
+}
+
+model FBDIBatch {
+  id              String      @id @default(uuid())
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id])
+  buId            String
+  status          BatchStatus @default(ASSEMBLING)
+  invoiceCount    Int
+  successCount    Int         @default(0)
+  failureCount    Int         @default(0)
+  ucmDocId        String?
+  oracleJobId     String?
+  oracleJobStatus String?
+  errorLog        String?
+  assembledAt     DateTime?
+  uploadedAt      DateTime?
+  submittedAt     DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime    @default(now())
+
+  invoices Invoice[]
+
+  @@index([tenantId, status])
+}
+
+// ─── AUDIT (append-only) ──────────────────────────────────────────────────────
+
+model AuditEvent {
+  id             String   @id @default(uuid())
+  tenantId       String
+  invoiceId      String?
+  invoice        Invoice? @relation(fields: [invoiceId], references: [id])
+  actorType      String
+  actorId        String?
+  actorUser      User?    @relation(fields: [actorId], references: [id])
+  actorIp        String?
+  eventType      String
+  description    String
+  beforeState    Json?
+  afterState     Json?
+  oraclePayload  Json?
+  oracleResponse Json?
+  createdAt      DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([tenantId, createdAt])
+}
