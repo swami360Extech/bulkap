@@ -1,9 +1,11 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "@/server/trpc";
+import { router, protectedProcedure, managerProcedure } from "@/server/trpc";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3Client, S3_BUCKET } from "@/server/services/s3";
 import { SourceChannel } from "@prisma/client";
+import { runExtractionPipeline } from "@/server/services/extraction/pipeline";
+import { pollSftp, getSftpConfigFromEnv } from "@/server/services/ingestion/sftp";
 import crypto from "crypto";
 
 export const ingestionRouter = router({
@@ -19,6 +21,16 @@ export const ingestionRouter = router({
       const tenantId = ctx.session.user.tenantId;
       const ext = input.filename.split(".").pop() ?? "bin";
       const s3Key = `invoices/${tenantId}/${crypto.randomUUID()}.${ext}`;
+
+      // In dev (no real S3 configured), route uploads through a local API endpoint
+      const isDev = !process.env.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID === "your-access-key-id";
+      if (isDev) {
+        return {
+          uploadUrl: `/api/upload-local?key=${encodeURIComponent(s3Key)}`,
+          s3Key,
+          expiresAt: new Date(Date.now() + 900_000),
+        };
+      }
 
       const command = new PutObjectCommand({
         Bucket: S3_BUCKET,
@@ -66,8 +78,10 @@ export const ingestionRouter = router({
         },
       });
 
-      // TODO: Publish to Kafka invoice.received topic when Kafka is configured
-      // await kafkaProducer.send({ topic: "invoice.received", messages: [{ key: invoice.id, value: JSON.stringify({ invoiceId: invoice.id, tenantId }) }] })
+      // Kick off extraction pipeline server-side (fire and forget)
+      runExtractionPipeline(invoice.id).catch((err) =>
+        console.error(`[pipeline] extraction failed for ${invoice.id}:`, err)
+      );
 
       return { invoiceId: invoice.id, status: invoice.status };
     }),
@@ -130,5 +144,48 @@ export const ingestionRouter = router({
         ...counts,
         complete: invoices.every((i) => !["RECEIVED", "EXTRACTING", "CLASSIFYING", "VALIDATING"].includes(i.status)),
       };
+    }),
+
+  // ── Manual SFTP poll trigger (managers only) ──────────────────────────────
+  pollSftp: managerProcedure
+    .input(z.object({
+      host:        z.string().optional(),
+      port:        z.number().int().default(22),
+      username:    z.string().optional(),
+      password:    z.string().optional(),
+      remotePath:  z.string().default("/invoices/incoming"),
+      archivePath: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = ctx.session.user.tenantId;
+
+      // Use provided values or fall back to env vars
+      const envConfig = getSftpConfigFromEnv();
+      const config = {
+        host:        input.host        ?? envConfig?.host        ?? "",
+        port:        input.port        ?? envConfig?.port        ?? 22,
+        username:    input.username    ?? envConfig?.username    ?? "",
+        password:    input.password    ?? envConfig?.password,
+        remotePath:  input.remotePath  ?? envConfig?.remotePath  ?? "/invoices/incoming",
+        archivePath: input.archivePath ?? envConfig?.archivePath,
+      };
+
+      if (!config.host || !config.username) {
+        throw new Error("SFTP host and username are required. Configure SFTP_HOST and SFTP_USERNAME env vars.");
+      }
+
+      const result = await pollSftp(tenantId, config);
+
+      await ctx.db.auditEvent.create({
+        data: {
+          tenantId,
+          actorType:   "user",
+          actorId:     ctx.session.user.id,
+          eventType:   "sftp.polled",
+          description: `SFTP poll by ${ctx.session.user.name}: ${result.processed} files ingested, ${result.errors.length} errors`,
+        },
+      });
+
+      return result;
     }),
 });

@@ -20,11 +20,12 @@ model Tenant {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  users         User[]
-  vendors       Vendor[]
-  invoices      Invoice[]
-  businessUnits BusinessUnit[]
-  fbdiBatches   FBDIBatch[]
+  users              User[]
+  vendors            Vendor[]
+  invoices           Invoice[]
+  businessUnits      BusinessUnit[]
+  fbdiBatches        FBDIBatch[]
+  oracleConnections  OracleConnection[]
 }
 
 model BusinessUnit {
@@ -67,6 +68,7 @@ model User {
   assignedExceptions Exception[]  @relation("AssignedTo")
   resolvedExceptions Exception[]  @relation("ResolvedBy")
   auditEvents        AuditEvent[]
+  queueItems         QueueItem[]  @relation("QueueAssignee")
 
   @@index([tenantId])
 }
@@ -218,6 +220,7 @@ model Invoice {
   exceptions  Exception[]
   auditEvents AuditEvent[]
   fbdiBatch   FBDIBatch?          @relation(fields: [fbdiBatchId], references: [id])
+  queueItems  QueueItem[]
 
   @@index([tenantId, status])
   @@index([tenantId, vendorId])
@@ -413,6 +416,130 @@ model FBDIBatch {
   invoices Invoice[]
 
   @@index([tenantId, status])
+}
+
+// ─── TEMP UPLOAD BUFFER ───────────────────────────────────────────────────────
+// Holds raw file bytes between the upload endpoint and the async extraction pipeline.
+// Deleted immediately after extraction completes or fails.
+
+model TempUpload {
+  id        String   @id @default(uuid())
+  s3Key     String   @unique
+  content   Bytes
+  mimeType  String
+  createdAt DateTime @default(now())
+}
+
+// ─── ORACLE CONNECTIONS ───────────────────────────────────────────────────────
+
+model OracleConnection {
+  id             String    @id @default(uuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id])
+  label          String
+  baseUrl        String
+  username       String
+  password       String
+  isActive       Boolean   @default(false)
+  lastTestedAt   DateTime?
+  lastTestOk     Boolean?
+  lastTestError  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([tenantId])
+}
+
+// ─── QUEUE MANAGEMENT ────────────────────────────────────────────────────────
+
+enum QueueType {
+  REVIEW
+  EXCEPTION
+  APPROVAL
+}
+
+enum QueuePriority {
+  CRITICAL
+  HIGH
+  NORMAL
+  LOW
+}
+
+enum QueueItemStatus {
+  UNASSIGNED
+  ASSIGNED
+  IN_PROGRESS
+  SNOOZED
+  ON_HOLD
+  COMPLETED
+  ESCALATED
+  RETURNED
+}
+
+model QueueItem {
+  id              String          @id @default(uuid())
+  tenantId        String
+  invoiceId       String
+  queueType       QueueType
+  assignedUserId  String?
+  status          QueueItemStatus @default(UNASSIGNED)
+  priority        QueuePriority   @default(NORMAL)
+  priorityScore   Int             @default(30)
+  slaDeadline     DateTime?
+  slaBreached     Boolean         @default(false)
+  slaBreachedAt   DateTime?
+  snoozeUntil     DateTime?
+  snoozeReason    String?
+  onHoldReason    String?
+  returnReason    String?
+  escalationNote  String?
+  lockedBy        String?
+  lockedAt        DateTime?
+  notes           String?
+  assignedAt      DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  tatMs           Int?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  invoice      Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  assignedUser User?          @relation("QueueAssignee", fields: [assignedUserId], references: [id])
+  events       QueueItemEvent[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, assignedUserId, status])
+  @@index([invoiceId])
+  @@index([slaDeadline])
+  @@index([tenantId, queueType, status, priorityScore])
+}
+
+model QueueItemEvent {
+  id         String    @id @default(uuid())
+  itemId     String
+  item       QueueItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  actorId    String?
+  action     String
+  fromStatus String?
+  toStatus   String?
+  note       String?
+  createdAt  DateTime  @default(now())
+
+  @@index([itemId])
+}
+
+model QueueSlaConfig {
+  id            String        @id @default(uuid())
+  tenantId      String
+  queueType     QueueType
+  priority      QueuePriority
+  targetMinutes Int
+  warningPct    Int           @default(75)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([tenantId, queueType, priority])
+  @@index([tenantId])
 }
 
 // ─── AUDIT (append-only) ──────────────────────────────────────────────────────

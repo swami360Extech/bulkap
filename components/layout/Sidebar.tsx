@@ -11,15 +11,23 @@ import {
   Settings,
   LogOut,
   Zap,
+  Send,
+  Users,
+  BarChart2,
+  Inbox,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/invoices", label: "Invoices", icon: FileText },
+  { href: "/dashboard",  label: "Dashboard",  icon: LayoutDashboard },
+  { href: "/invoices",   label: "Invoices",   icon: FileText },
+  { href: "/submit",     label: "Submit",     icon: Send },
   { href: "/exceptions", label: "Exceptions", icon: AlertTriangle },
-  { href: "/vendors", label: "Vendors", icon: Building2 },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/vendors",    label: "Vendors",    icon: Building2 },
+  { href: "/team",       label: "Team",       icon: Users },
+  { href: "/queue",      label: "Queue",      icon: Inbox },
+  { href: "/reports/aging", label: "Reports", icon: BarChart2 },
+  { href: "/settings",   label: "Settings",   icon: Settings },
 ];
 
 export function Sidebar() {

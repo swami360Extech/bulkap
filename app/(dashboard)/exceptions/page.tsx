@@ -110,15 +110,22 @@ function WaiveDialog({ exceptionId, onSuccess }: { exceptionId: string; onSucces
   );
 }
 
+const TYPE_OPTIONS: { value: ExceptionType | ""; label: string }[] = [
+  { value: "", label: "All types" },
+  ...Object.entries(TYPE_LABELS).map(([value, label]) => ({ value: value as ExceptionType, label })),
+];
+
 export default function ExceptionsPage() {
   const [severity, setSeverity] = useState<ExceptionSeverity | "">("");
   const [status,   setStatus]   = useState<ExceptionStatus | "">("");
+  const [type,     setType]     = useState<ExceptionType | "">("");
   const [page, setPage] = useState(1);
 
   const { data: counts } = trpc.exception.counts.useQuery();
   const { data, isLoading, refetch } = trpc.exception.list.useQuery({
     severity: severity || undefined,
     status:   status   || undefined,
+    type:     type     || undefined,
     page,
     pageSize: 50,
   });
@@ -160,6 +167,13 @@ export default function ExceptionsPage() {
             className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <select
+            value={type}
+            onChange={(e) => { setType(e.target.value as ExceptionType | ""); setPage(1); }}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
 

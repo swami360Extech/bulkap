@@ -2,6 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure, managerProcedure } from "@/server/trpc";
 import { InvoiceStatus, InvoiceType, SourceChannel } from "@prisma/client";
 import { TRPCError } from "@trpc/server";
+import { runValidationPipeline } from "@/server/services/extraction/validation-pipeline";
 
 export const invoiceRouter = router({
   list: protectedProcedure
@@ -45,7 +46,11 @@ export const invoiceRouter = router({
       const [invoices, total] = await Promise.all([
         ctx.db.invoice.findMany({
           where,
-          include: { vendor: { select: { name: true } }, exceptions: { where: { status: "OPEN" } } },
+          include: {
+            vendor:     { select: { name: true } },
+            exceptions: { where: { status: "OPEN" } },
+            fields:     { where: { fieldName: "vendor_name" }, select: { extractedValue: true, confirmedValue: true } },
+          },
           orderBy: { [sortBy]: sortDir },
           skip: (page - 1) * pageSize,
           take: pageSize,
@@ -151,6 +156,35 @@ export const invoiceRouter = router({
       return updated;
     }),
 
+  // Advance a REVIEW_REQUIRED invoice back into the validation pipeline
+  runValidation: protectedProcedure
+    .input(z.object({ invoiceId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const invoice = await ctx.db.invoice.findFirst({
+        where: { id: input.invoiceId, tenantId: ctx.session.user.tenantId, status: "REVIEW_REQUIRED" },
+      });
+      if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "Invoice not found or not in REVIEW_REQUIRED status" });
+
+      await ctx.db.invoice.update({ where: { id: input.invoiceId }, data: { status: "VALIDATING" } });
+
+      await ctx.db.auditEvent.create({
+        data: {
+          tenantId: ctx.session.user.tenantId,
+          invoiceId: input.invoiceId,
+          actorType: "user",
+          actorId: ctx.session.user.id,
+          eventType: "invoice.validation_triggered",
+          description: `Validation re-triggered by ${ctx.session.user.name} after field review`,
+        },
+      });
+
+      runValidationPipeline(input.invoiceId).catch((err) =>
+        console.error(`[validation] re-trigger failed for ${input.invoiceId}:`, err)
+      );
+
+      return { success: true };
+    }),
+
   delete: protectedProcedure
     .input(z.object({ invoiceId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
@@ -176,6 +210,43 @@ export const invoiceRouter = router({
       _count: { status: true },
     });
     return Object.fromEntries(counts.map((c) => [c.status, c._count.status])) as Record<InvoiceStatus, number>;
+  }),
+
+  // 7-day daily throughput for dashboard trend chart
+  trend: protectedProcedure.query(async ({ ctx }) => {
+    const tenantId = ctx.session.user.tenantId;
+    const from = new Date();
+    from.setUTCHours(0, 0, 0, 0);
+    from.setUTCDate(from.getUTCDate() - 6); // last 7 days inclusive
+
+    const invoices = await ctx.db.invoice.findMany({
+      where: { tenantId, receivedAt: { gte: from } },
+      select: { receivedAt: true, validatedAt: true, submittedAt: true, status: true },
+    });
+
+    const POST_VALIDATION = new Set(["READY_FOR_SUBMISSION","SUBMITTING","SUBMITTED","ORACLE_PROCESSING","APPROVED","PAID"]);
+    const POST_SUBMISSION  = new Set(["SUBMITTED","ORACLE_PROCESSING","APPROVED","PAID"]);
+
+    const result = [];
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(from);
+      day.setUTCDate(from.getUTCDate() + i);
+      const dayEnd = new Date(day);
+      dayEnd.setUTCDate(day.getUTCDate() + 1);
+
+      const dayInvoices = invoices.filter((inv) => {
+        const d = new Date(inv.receivedAt);
+        return d >= day && d < dayEnd;
+      });
+
+      result.push({
+        date:      day.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
+        received:  dayInvoices.length,
+        validated: dayInvoices.filter((i) => POST_VALIDATION.has(i.status)).length,
+        submitted: dayInvoices.filter((i) => POST_SUBMISSION.has(i.status)).length,
+      });
+    }
+    return result;
   }),
 
   metrics: protectedProcedure

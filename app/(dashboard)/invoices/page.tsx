@@ -6,13 +6,30 @@ import { TopBar } from "@/components/layout/TopBar";
 import { InvoiceStatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { trpc } from "@/lib/trpc";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { type InvoiceStatus } from "@prisma/client";
 import {
-  Upload, Search, Filter, FileText,
-  ChevronLeft, ChevronRight, ArrowUpDown,
+  Upload, Search, Filter, FileText, Trash2,
+  ChevronLeft, ChevronRight, ArrowUpDown, Play, Send,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+const INVOICE_TYPE_LABELS: Record<string, string> = {
+  STANDARD_PO:         "Standard PO",
+  NON_PO_SERVICE:      "Non-PO Service",
+  CREDIT_MEMO:         "Credit Memo",
+  DEBIT_MEMO:          "Debit Memo",
+  PREPAYMENT:          "Prepayment",
+  RECURRING:           "Recurring",
+  FREIGHT:             "Freight",
+  CAPITAL_EXPENDITURE: "Capital Expenditure",
+  INTERCOMPANY:        "Intercompany",
+  FOREIGN_CURRENCY:    "Foreign Currency",
+  TAX_ONLY:            "Tax Only",
+  UNKNOWN:             "Unknown",
+};
 
 const STATUS_OPTIONS: { value: InvoiceStatus | ""; label: string }[] = [
   { value: "",                    label: "All statuses" },
@@ -30,6 +47,7 @@ const STATUS_OPTIONS: { value: InvoiceStatus | ""; label: string }[] = [
 ];
 
 export default function InvoicesPage() {
+  const router = useRouter();
   const [search, setSearch]   = useState("");
   const [status, setStatus]   = useState<InvoiceStatus | "">("");
   const [page, setPage]       = useState(1);
@@ -37,14 +55,13 @@ export default function InvoicesPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const { data, isLoading } = trpc.invoice.list.useQuery({
-    search:  search || undefined,
-    status:  status || undefined,
-    page,
-    pageSize: 50,
-    sortBy,
-    sortDir,
-  });
+  const PROCESSING = new Set(["RECEIVED", "CLASSIFYING", "EXTRACTING", "VALIDATING"]);
+  const { data, isLoading, refetch } = trpc.invoice.list.useQuery(
+    { search: search || undefined, status: status || undefined, page, pageSize: 50, sortBy, sortDir },
+    { refetchInterval: (query) => query.state.data?.invoices.some((i) => PROCESSING.has(i.status)) ? 3000 : false }
+  );
+  const deleteInvoice   = trpc.invoice.delete.useMutation({ onSuccess: () => refetch() });
+  const runValidation   = trpc.invoice.runValidation.useMutation({ onSuccess: () => refetch() });
 
   function toggleSort(col: typeof sortBy) {
     if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -113,8 +130,13 @@ export default function InvoicesPage() {
           {selected.size > 0 && (
             <div className="flex items-center gap-2 ml-auto">
               <span className="text-sm text-slate-600">{selected.size} selected</span>
-              <Button variant="outline" size="sm">Submit to Oracle</Button>
-              <Button variant="outline" size="sm">Assign</Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push("/submit")}
+              >
+                <Send className="w-3.5 h-3.5" /> Submit to Oracle
+              </Button>
             </div>
           )}
         </div>
@@ -151,6 +173,7 @@ export default function InvoicesPage() {
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Exceptions</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -186,17 +209,25 @@ export default function InvoicesPage() {
                         />
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-900">
-                        {inv.vendor?.name ?? <span className="text-slate-400 italic">Unknown</span>}
+                        {(() => {
+                          const inv_ = inv as any;
+                          const name = inv_.vendor?.name
+                            ?? inv_.fields?.[0]?.confirmedValue
+                            ?? inv_.fields?.[0]?.extractedValue;
+                          return name ?? <span className="text-slate-400 italic">Unknown</span>;
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-slate-600 font-mono text-xs">
                         <Link href={`/invoices/${inv.id}`} className="hover:text-blue-700 hover:underline">
-                          {inv.externalInvoiceNum ?? inv.id.slice(0, 8)}
+                          {inv.externalInvoiceNum ?? inv.originalFilename ?? inv.id.slice(0, 8)}
                         </Link>
                       </td>
                       <td className="px-4 py-3 text-slate-900">
                         {inv.grossAmount ? formatCurrency(Number(inv.grossAmount), inv.currency ?? "USD") : "—"}
                       </td>
-                      <td className="px-4 py-3 text-slate-500 text-xs">{inv.invoiceType.replace(/_/g, " ")}</td>
+                      <td className="px-4 py-3 text-slate-500 text-xs">
+                        {INVOICE_TYPE_LABELS[inv.invoiceType] ?? inv.invoiceType}
+                      </td>
                       <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(inv.receivedAt)}</td>
                       <td className="px-4 py-3 text-slate-500 text-xs">
                         {inv.dueDate ? (
@@ -212,6 +243,43 @@ export default function InvoicesPage() {
                             {openExceptions} open
                           </span>
                         ) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          {inv.status === "REVIEW_REQUIRED" && (
+                            <button
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                              title="Run Validation"
+                              onClick={() => runValidation.mutate({ invoiceId: inv.id })}
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {!["SUBMITTED","ORACLE_PROCESSING","APPROVED","PAID"].includes(inv.status) && (
+                            <Dialog>
+                              <DialogTrigger asChild>
+                                <button className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </DialogTrigger>
+                              <DialogContent
+                                title="Delete Invoice"
+                                description={`Delete "${inv.externalInvoiceNum ?? inv.originalFilename ?? inv.id.slice(0,8)}"? This cannot be undone.`}
+                              >
+                                <div className="flex justify-end gap-2 mt-2">
+                                  <Button variant="secondary">Cancel</Button>
+                                  <Button
+                                    variant="destructive"
+                                    loading={deleteInvoice.isPending && deleteInvoice.variables?.invoiceId === inv.id}
+                                    onClick={() => deleteInvoice.mutate({ invoiceId: inv.id })}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                                  </Button>
+                                </div>
+                              </DialogContent>
+                            </Dialog>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

@@ -61,3 +61,7 @@ export function getOracleClient(tenantId: string, config: OracleClientConfig): O
   }
   return clientCache.get(tenantId)!;
 }
+
+export function clearOracleClientCache(tenantId: string) {
+  clientCache.delete(tenantId);
+}

@@ -11,7 +11,14 @@ export function formatCurrency(amount: number | string, currency = "USD"): strin
 
 export function formatDate(date: Date | string | null): string {
   if (!date) return "—";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(date));
+  // Always render in UTC so date-only values (stored as UTC midnight/noon) don't shift day across timezones
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short", day: "numeric", year: "numeric", timeZone: "UTC",
+  }).format(new Date(date));
+}
+
+export function toTitleCase(str: string): string {
+  return str.toLowerCase().replace(/(?:^|[\s_-])(\w)/g, (_, c) => " " + c.toUpperCase()).trim();
 }
 
 export function formatPercent(value: number): string {
