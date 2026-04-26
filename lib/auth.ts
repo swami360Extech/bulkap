@@ -11,12 +11,14 @@ declare module "next-auth" {
       email: string;
       role: string;
       tenantId: string;
+      mustChangePassword: boolean;
     };
   }
   interface User {
     id: string;
     role: string;
     tenantId: string;
+    mustChangePassword: boolean;
   }
 }
 
@@ -25,6 +27,7 @@ declare module "next-auth/jwt" {
     id: string;
     role: string;
     tenantId: string;
+    mustChangePassword: boolean;
   }
 }
 
@@ -54,11 +57,12 @@ export const authOptions: NextAuthOptions = {
         await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
         return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          tenantId: user.tenantId,
+          id:                 user.id,
+          name:               user.name,
+          email:              user.email,
+          role:               user.role,
+          tenantId:           user.tenantId,
+          mustChangePassword: user.mustChangePassword,
         };
       },
     }),
@@ -66,16 +70,18 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.id = user.id;
-        token.role = user.role;
-        token.tenantId = user.tenantId;
+        token.id                 = user.id;
+        token.role               = user.role;
+        token.tenantId           = user.tenantId;
+        token.mustChangePassword = user.mustChangePassword;
       }
       return token;
     },
     async session({ session, token }) {
-      session.user.id = token.id;
-      session.user.role = token.role;
-      session.user.tenantId = token.tenantId;
+      session.user.id                 = token.id;
+      session.user.role               = token.role;
+      session.user.tenantId           = token.tenantId;
+      session.user.mustChangePassword = token.mustChangePassword;
       return session;
     },
   },
