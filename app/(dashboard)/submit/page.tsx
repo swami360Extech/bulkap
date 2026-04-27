@@ -246,55 +246,72 @@ export default function SubmitPage() {
                   <thead className="bg-slate-50">
                     <tr className="text-xs text-slate-500 uppercase tracking-wide">
                       <th className="px-5 py-2.5 text-left font-semibold">Batch ID</th>
+                      <th className="px-5 py-2.5 text-left font-semibold">Invoice #</th>
                       <th className="px-5 py-2.5 text-left font-semibold">Status</th>
-                      <th className="px-5 py-2.5 text-right font-semibold">Invoices</th>
+                      <th className="px-5 py-2.5 text-right font-semibold">Count</th>
                       <th className="px-5 py-2.5 text-right font-semibold">Success</th>
                       <th className="px-5 py-2.5 text-left font-semibold">Submitted</th>
                       <th className="px-5 py-2.5 text-left font-semibold">Completed</th>
-                      <th className="px-5 py-2.5 text-right font-semibold w-20"></th>
+                      <th className="px-5 py-2.5 text-right font-semibold w-16"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {batchData.batches.map((batch) => (
-                      <tr key={batch.id} className="hover:bg-slate-50">
-                        <td className="px-5 py-3 font-mono text-xs text-slate-700">
-                          {batch.id.slice(0, 8).toUpperCase()}
-                        </td>
-                        <td className="px-5 py-3">
-                          <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded border ${BATCH_STATUS_COLOR[batch.status] ?? "text-slate-700 bg-slate-50 border-slate-200"}`}>
-                            {BATCH_STATUS_LABELS[batch.status] ?? batch.status}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3 text-right text-slate-700">{batch.invoiceCount}</td>
-                        <td className="px-5 py-3 text-right">
-                          <span className={batch.failureCount > 0 ? "text-red-600 font-semibold" : "text-emerald-600 font-semibold"}>
-                            {batch.successCount}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3 text-xs text-slate-500">
-                          {batch.submittedAt ? formatDate(batch.submittedAt) : "—"}
-                        </td>
-                        <td className="px-5 py-3 text-xs text-slate-500">
-                          {batch.completedAt ? formatDate(batch.completedAt) : "—"}
-                        </td>
-                        <td className="px-5 py-3 text-right">
-                          {batch.oracleJobId && batch.status === "JOB_SUBMITTED" && (
-                            <button
-                              onClick={() => syncStatus.mutate({ batchId: batch.id })}
-                              className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
-                              title="Sync Oracle status"
-                            >
-                              <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isPending ? "animate-spin" : ""}`} />
-                            </button>
-                          )}
-                          {batch.status === "JOB_FAILED" && batch.errorLog && (
-                            <span title={batch.errorLog}>
-                              <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                    {batchData.batches.map((batch) => {
+                      const batchAny = batch as typeof batch & { invoices?: { externalInvoiceNum: string | null; id: string }[] };
+                      const invNums  = batchAny.invoices ?? [];
+                      const invLabel = invNums.length === 1
+                        ? (invNums[0].externalInvoiceNum ?? invNums[0].id.slice(0, 8))
+                        : invNums.length > 1
+                          ? `${invNums[0].externalInvoiceNum ?? invNums[0].id.slice(0, 8)} +${invNums.length - 1}`
+                          : "—";
+                      return (
+                        <tr key={batch.id} className="hover:bg-slate-50">
+                          <td className="px-5 py-3 font-mono text-xs text-slate-700">
+                            {batch.id.slice(0, 8).toUpperCase()}
+                          </td>
+                          <td className="px-5 py-3 font-mono text-xs text-blue-700 font-medium" title={invNums.map(i => i.externalInvoiceNum ?? i.id.slice(0,8)).join(", ")}>
+                            {invLabel}
+                          </td>
+                          <td className="px-5 py-3">
+                            <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded border ${BATCH_STATUS_COLOR[batch.status] ?? "text-slate-700 bg-slate-50 border-slate-200"}`}>
+                              {BATCH_STATUS_LABELS[batch.status] ?? batch.status}
                             </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="px-5 py-3 text-right text-slate-700">{batch.invoiceCount}</td>
+                          <td className="px-5 py-3 text-right">
+                            <span className={(batch.failureCount ?? 0) > 0 ? "text-red-600 font-semibold" : "text-emerald-600 font-semibold"}>
+                              {batch.successCount ?? 0}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3 text-xs text-slate-500">
+                            {batch.submittedAt
+                              ? new Date(batch.submittedAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                              : "—"}
+                          </td>
+                          <td className="px-5 py-3 text-xs text-slate-500">
+                            {batch.completedAt
+                              ? new Date(batch.completedAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                              : "—"}
+                          </td>
+                          <td className="px-5 py-3 text-right">
+                            {batch.oracleJobId && batch.status === "JOB_SUBMITTED" && (
+                              <button
+                                onClick={() => syncStatus.mutate({ batchId: batch.id })}
+                                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+                                title="Sync Oracle status"
+                              >
+                                <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.isPending ? "animate-spin" : ""}`} />
+                              </button>
+                            )}
+                            {batch.status === "JOB_FAILED" && batch.errorLog && (
+                              <span title={batch.errorLog ?? ""}>
+                                <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
 

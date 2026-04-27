@@ -75,7 +75,7 @@ async function main() {
     { name: "Lee Supplies",      oracleSupplierId: "300000047414503", oracleSupplierNum: "1252", oracleSupplierSite: "Lee US1"      },
     { name: "JGA",               oracleSupplierId: "300000047414635", oracleSupplierNum: "1254", oracleSupplierSite: "JGA US1"      },
     { name: "ABC Consulting",    oracleSupplierId: "300000075039541", oracleSupplierNum: "1288", oracleSupplierSite: "ABC US1"      },
-    { name: "AllPros Consulting",oracleSupplierId: "300000047414571", oracleSupplierNum: "1253", oracleSupplierSite: "Staffing US1" },
+    { name: "AllPros Consulting",oracleSupplierId: "300000047414571", oracleSupplierNum: "1253", oracleSupplierSite: "Staffing US1", oracleSupplierName: "Staffing Services" },
   ];
 
   for (const v of vendorDefs) {

@@ -88,10 +88,11 @@ model Vendor {
   id                String    @id @default(uuid())
   tenantId          String
   tenant            Tenant    @relation(fields: [tenantId], references: [id])
-  oracleSupplierId  String
-  oracleSupplierNum String
+  oracleSupplierId   String
+  oracleSupplierNum  String
   oracleSupplierSite String?
-  name              String
+  oracleSupplierName String?
+  name               String
   taxRegistration   String?
   defaultCurrency   String    @default("USD")
   paymentTerms      String?

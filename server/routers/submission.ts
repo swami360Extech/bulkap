@@ -156,8 +156,12 @@ export const submissionRouter = router({
 
               if (!vendor) throw new Error(`No vendor linked to invoice ${invoiceNum}`);
 
-              const vendorAny = vendor as typeof vendor & { oracleSupplierSite?: string | null };
-              const site = vendorAny.oracleSupplierSite ?? "";
+              const vendorAny = vendor as typeof vendor & {
+                oracleSupplierSite?: string | null;
+                oracleSupplierName?: string | null;
+              };
+              const site           = vendorAny.oracleSupplierSite ?? "";
+              const oracleSupplier = vendorAny.oracleSupplierName ?? vendor.name;
               if (!site) throw new Error(`Vendor "${vendor.name}" has no oracleSupplierSite configured`);
 
               const lines = inv.lines.length > 0
@@ -181,7 +185,7 @@ export const submissionRouter = router({
                 InvoiceNumber:   invoiceNum,
                 InvoiceType:     "Standard",
                 BusinessUnit:    buName,
-                Supplier:        vendor.name,
+                Supplier:        oracleSupplier,
                 SupplierSite:    site,
                 InvoiceDate:     inv.invoiceDate
                   ? new Date(inv.invoiceDate).toISOString().slice(0, 10)
@@ -300,6 +304,12 @@ export const submissionRouter = router({
           orderBy: { createdAt: "desc" },
           skip: (input.page - 1) * input.pageSize,
           take: input.pageSize,
+          include: {
+            invoices: {
+              select: { externalInvoiceNum: true, id: true },
+              orderBy: { externalInvoiceNum: "asc" },
+            },
+          },
         }),
         ctx.db.fBDIBatch.count({ where: { tenantId } }),
       ]);
