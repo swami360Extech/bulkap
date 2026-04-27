@@ -46,12 +46,12 @@ export async function submitInvoiceDirect(
   client: OracleRestClient,
   payload: OracleInvoicePayload
 ): Promise<OracleSubmitResult> {
-  const res = await client.post<{ InvoiceId: string; InvoiceNumber: string; Status: string }>(
+  const res = await client.post<{ InvoiceId: number | string; InvoiceNumber: string; Status: string }>(
     "/fscmRestApi/resources/11.13.18.05/invoices",
     payload
   );
   return {
-    oracleInvoiceId:  res.InvoiceId,
+    oracleInvoiceId:  String(res.InvoiceId),   // Oracle returns numeric ID; schema expects String
     oracleInvoiceNum: res.InvoiceNumber,
     oracleStatus:     res.Status ?? "NEEDS_VALIDATION",
   };
