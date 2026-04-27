@@ -76,11 +76,19 @@ export async function runExtractionPipeline(invoiceId: string): Promise<void> {
 
     const extractedVendorName = result.fields.find((f) => f.name === "vendor_name")?.value;
     let resolvedVendorId = invoice.vendorId;
+    let vendorUnmatched = false;
     if (extractedVendorName && !resolvedVendorId) {
+      // Exact match first, then partial/contains match as fallback
       const matched = await db.vendor.findFirst({
         where: { tenantId: invoice.tenantId, name: { equals: extractedVendorName, mode: "insensitive" } },
+      }) ?? await db.vendor.findFirst({
+        where: { tenantId: invoice.tenantId, name: { contains: extractedVendorName.split(" ")[0], mode: "insensitive" } },
       });
-      if (matched) resolvedVendorId = matched.id;
+      if (matched) {
+        resolvedVendorId = matched.id;
+      } else {
+        vendorUnmatched = true;
+      }
     }
 
     const fv = (name: string) => result.fields.find((f) => f.name === name)?.value ?? null;
@@ -132,7 +140,7 @@ export async function runExtractionPipeline(invoiceId: string): Promise<void> {
           extractionAvgConf:  avgConf,
           contentHash,
           reviewRequired:     avgConf < 0.80,
-          status:             avgConf < 0.80 ? "REVIEW_REQUIRED" : "VALIDATING",
+          status:             (avgConf < 0.80 || vendorUnmatched) ? "REVIEW_REQUIRED" : "VALIDATING",
         },
       }),
     ]);
@@ -146,6 +154,27 @@ export async function runExtractionPipeline(invoiceId: string): Promise<void> {
         description: `AI extraction complete — ${result.fields.length} fields, avg confidence ${Math.round(avgConf * 100)}%`,
       },
     });
+
+    if (vendorUnmatched && extractedVendorName) {
+      await db.exception.create({
+        data: {
+          invoiceId,
+          type:        "VENDOR_NOT_FOUND",
+          severity:    "BLOCKING",
+          description: `Vendor "${extractedVendorName}" was not found in the system. Invoice cannot be submitted until a vendor is assigned.`,
+          aiSuggestion: `Add "${extractedVendorName}" as a vendor in Oracle Fusion and sync it to BulkAP, then re-process this invoice.`,
+        },
+      });
+      await db.auditEvent.create({
+        data: {
+          tenantId: invoice.tenantId,
+          invoiceId,
+          actorType: "system",
+          eventType: "invoice.vendor_unmatched",
+          description: `Vendor "${extractedVendorName}" not found — invoice held in REVIEW_REQUIRED`,
+        },
+      });
+    }
 
     if (avgConf < 0.80) {
       await db.exception.create({
