@@ -90,6 +90,7 @@ model Vendor {
   tenant            Tenant    @relation(fields: [tenantId], references: [id])
   oracleSupplierId  String
   oracleSupplierNum String
+  oracleSupplierSite String?
   name              String
   taxRegistration   String?
   defaultCurrency   String    @default("USD")

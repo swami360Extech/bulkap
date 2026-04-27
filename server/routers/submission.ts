@@ -5,8 +5,6 @@ import { generateFBDI } from "@/server/services/fbdi/generator";
 import { getOracleClient } from "@/server/services/oracle/client";
 import {
   submitInvoiceDirect,
-  uploadFBDIToUCM,
-  submitESSJob,
   pollESSJobStatus,
 } from "@/server/services/oracle/submitter";
 import {
@@ -134,7 +132,7 @@ export const submissionRouter = router({
             });
           }
         } else {
-          // Production path — FBDI upload to Oracle UCM then ESS job
+          // Production path — direct REST API per invoice (submitInvoiceDirect)
           const oracleClient = getOracleClient(tenantId, {
             baseUrl:  tenant.oracleBaseUrl,
             username: tenant.oracleUsername,
@@ -146,33 +144,103 @@ export const submissionRouter = router({
             data: { status: "ASSEMBLING", assembledAt: new Date() },
           });
 
-          const ucm = await uploadFBDIToUCM(oracleClient, fbdi.headerCsv, fbdi.linesCsv, batch.id);
+          let successCount = 0;
+          let failureCount = 0;
+          const errors: string[] = [];
 
-          await ctx.db.fBDIBatch.update({
-            where: { id: batch.id },
-            data: { status: "UPLOADED_TO_UCM", ucmDocId: ucm.ucmDocId, uploadedAt: new Date() },
-          });
+          for (const inv of invoices) {
+            try {
+              const invoiceNum = inv.externalInvoiceNum ?? `BULKAP-${inv.id.slice(0, 8).toUpperCase()}`;
+              const vendor = inv.vendor;
+              const buName  = inv.businessUnit?.name ?? bu?.name ?? "US1 Business Unit";
 
-          const ess = await submitESSJob(
-            oracleClient,
-            ucm.ucmDocId,
-            bu?.oracleBuId ?? "",
-            batch.id
-          );
+              if (!vendor) throw new Error(`No vendor linked to invoice ${invoiceNum}`);
+
+              const vendorAny = vendor as typeof vendor & { oracleSupplierSite?: string | null };
+              const site = vendorAny.oracleSupplierSite ?? "";
+              if (!site) throw new Error(`Vendor "${vendor.name}" has no oracleSupplierSite configured`);
+
+              const lines = inv.lines.length > 0
+                ? inv.lines.map((l, idx) => ({
+                    LineNumber:  l.lineNumber ?? idx + 1,
+                    LineType:    "Item" as const,
+                    LineAmount:  Number(l.lineAmount ?? 0),
+                    Description: l.description ?? undefined,
+                    Quantity:    l.quantity   ? Number(l.quantity)   : undefined,
+                    UnitPrice:   l.unitPrice  ? Number(l.unitPrice)  : undefined,
+                    PONumber:    l.poNumber   ?? inv.poNumber        ?? undefined,
+                  }))
+                : [{
+                    LineNumber:  1,
+                    LineType:    "Item" as const,
+                    LineAmount:  Number(inv.netAmount ?? inv.grossAmount ?? 0),
+                    Description: "Invoice line",
+                  }];
+
+              const result = await submitInvoiceDirect(oracleClient, {
+                InvoiceNumber:   invoiceNum,
+                InvoiceType:     "Standard",
+                BusinessUnit:    buName,
+                Supplier:        vendor.name,
+                SupplierSite:    site,
+                InvoiceDate:     inv.invoiceDate
+                  ? new Date(inv.invoiceDate).toISOString().slice(0, 10)
+                  : new Date().toISOString().slice(0, 10),
+                InvoiceCurrency: inv.currency ?? "USD",
+                InvoiceAmount:   Number(inv.grossAmount ?? 0),
+                PaymentTerms:    inv.paymentTerms ?? undefined,
+                invoiceLines:    lines,
+              });
+
+              await ctx.db.invoice.update({
+                where: { id: inv.id },
+                data: {
+                  status:           "SUBMITTED",
+                  oracleInvoiceId:  result.oracleInvoiceId,
+                  oracleStatus:     result.oracleStatus,
+                },
+              });
+
+              await ctx.db.auditEvent.create({
+                data: {
+                  tenantId,
+                  invoiceId:   inv.id,
+                  actorType:   "user",
+                  actorId:     ctx.session.user.id,
+                  eventType:   "invoice.submitted",
+                  description: `Submitted to Oracle — InvoiceId: ${result.oracleInvoiceId}`,
+                },
+              });
+
+              successCount++;
+            } catch (invErr) {
+              failureCount++;
+              errors.push(`${inv.externalInvoiceNum ?? inv.id.slice(0,8)}: ${String(invErr)}`);
+
+              await ctx.db.invoice.update({
+                where: { id: inv.id },
+                data: { status: "READY_FOR_SUBMISSION", fbdiBatchId: null, submittedAt: null },
+              });
+            }
+          }
 
           await ctx.db.fBDIBatch.update({
             where: { id: batch.id },
             data: {
-              status: "JOB_SUBMITTED",
-              oracleJobId: ess.oracleJobId,
-              submittedAt: new Date(),
+              status:       failureCount === 0 ? "JOB_COMPLETED" : successCount === 0 ? "JOB_FAILED" : "PARTIALLY_FAILED",
+              successCount,
+              failureCount,
+              assembledAt:  new Date(),
+              uploadedAt:   new Date(),
+              submittedAt:  new Date(),
+              completedAt:  new Date(),
+              errorLog:     errors.length > 0 ? errors.join("\n") : null,
             },
           });
 
-          await ctx.db.invoice.updateMany({
-            where: { id: { in: invoices.map((i) => i.id) } },
-            data: { status: "SUBMITTED" },
-          });
+          if (successCount === 0 && errors.length > 0) {
+            throw new Error(errors[0]);
+          }
         }
 
         await ctx.db.auditEvent.create({

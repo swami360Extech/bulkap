@@ -13,26 +13,30 @@ async function main() {
   // Tenant
   const tenant = await db.tenant.upsert({
     where: { slug: "acme" },
-    update: {},
+    update: {
+      oracleBaseUrl:  "https://fa-eqhy-dev7-saasfademo1.ds-fa.oraclepdemos.com",
+      oracleUsername: "ROGER.BOLTON",
+      oraclePassword: "tJ8yu%3%",
+    },
     create: {
       name: "Acme Corp",
       slug: "acme",
-      oracleBaseUrl: "https://oracle.example.com",
-      oracleUsername: "ap_user",
-      oraclePassword: "secret",
+      oracleBaseUrl:  "https://fa-eqhy-dev7-saasfademo1.ds-fa.oraclepdemos.com",
+      oracleUsername: "ROGER.BOLTON",
+      oraclePassword: "tJ8yu%3%",
       defaultCurrency: "USD",
       legislationCode: "US",
     },
   });
 
-  // Business Unit (unique on tenantId + oracleBuId)
+  // Business Unit — matches Oracle demo "US1 Business Unit"
   const bu = await db.businessUnit.upsert({
-    where: { tenantId_oracleBuId: { tenantId: tenant.id, oracleBuId: "300000001234567" } },
-    update: {},
+    where: { tenantId_oracleBuId: { tenantId: tenant.id, oracleBuId: "US1_BU_ID" } },
+    update: { name: "US1 Business Unit" },
     create: {
       tenantId: tenant.id,
-      name: "US Corporate",
-      oracleBuId: "300000001234567",
+      name: "US1 Business Unit",
+      oracleBuId: "US1_BU_ID",
       ledgerCurrency: "USD",
       legislationCode: "US",
     },
@@ -66,17 +70,17 @@ async function main() {
     },
   });
 
-  // Vendors (unique on tenantId + oracleSupplierId)
+  // Vendors — mapped to real Oracle FA demo suppliers (fa-eqhy-dev7)
   const vendorDefs = [
-    { name: "TechSupply Inc",    oracleSupplierId: "300000001001", oracleSupplierNum: "SUPP-1001" },
-    { name: "Office Pro Ltd",    oracleSupplierId: "300000001002", oracleSupplierNum: "SUPP-1002" },
-    { name: "Cloud Services Co", oracleSupplierId: "300000001003", oracleSupplierNum: "SUPP-1003" },
+    { name: "Lee Supplies",   oracleSupplierId: "300000047414503", oracleSupplierNum: "1252", oracleSupplierSite: "Lee US1" },
+    { name: "JGA",            oracleSupplierId: "300000047414635", oracleSupplierNum: "1254", oracleSupplierSite: "JGA US1" },
+    { name: "ABC Consulting", oracleSupplierId: "300000075039541", oracleSupplierNum: "1288", oracleSupplierSite: "ABC US1" },
   ];
 
   for (const v of vendorDefs) {
     await db.vendor.upsert({
       where: { tenantId_oracleSupplierId: { tenantId: tenant.id, oracleSupplierId: v.oracleSupplierId } },
-      update: {},
+      update: { name: v.name, oracleSupplierNum: v.oracleSupplierNum, oracleSupplierSite: v.oracleSupplierSite },
       create: { tenantId: tenant.id, ...v, defaultCurrency: "USD", exceptionRate: 0 },
     });
   }

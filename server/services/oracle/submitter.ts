@@ -13,17 +13,17 @@ import type { OracleRestClient } from "./client";
 // ── Direct REST API submission (single invoice) ───────────────────────────────
 
 export interface OracleInvoicePayload {
-  InvoiceNumber:          string;
-  InvoiceType:            string;
-  BusinessUnit:           string;
-  Supplier:               string;
-  SupplierNumber:         string;
-  InvoiceDate:            string;   // "YYYY-MM-DD"
-  InvoiceCurrency:        string;
-  InvoiceAmount:          number;
-  PaymentTerms?:          string;
-  Description?:           string;
-  invoiceLines?:          OracleInvoiceLine[];
+  InvoiceNumber:   string;
+  InvoiceType:     string;
+  BusinessUnit:    string;
+  Supplier:        string;
+  SupplierSite:    string;
+  InvoiceDate:     string;   // "YYYY-MM-DD"
+  InvoiceCurrency: string;
+  InvoiceAmount:   number;
+  PaymentTerms?:   string;
+  Description?:    string;
+  invoiceLines?:   OracleInvoiceLine[];
 }
 
 export interface OracleInvoiceLine {
