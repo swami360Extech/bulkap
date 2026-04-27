@@ -29,7 +29,7 @@ export interface OracleInvoicePayload {
 export interface OracleInvoiceLine {
   LineNumber:    number;
   LineType:      string;
-  Amount:        number;
+  LineAmount:    number;   // Oracle field name — NOT "Amount"
   Description?:  string;
   Quantity?:     number;
   UnitPrice?:    number;
