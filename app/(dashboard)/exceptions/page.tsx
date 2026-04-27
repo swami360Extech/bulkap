@@ -41,6 +41,7 @@ const TYPE_LABELS: Record<ExceptionType, string> = {
   PERIOD_CLOSED:            "Period Closed",
   LOW_CONFIDENCE_EXTRACTION:"Low Confidence Extraction",
   ORACLE_IMPORT_ERROR:      "Oracle Import Error",
+  VENDOR_NOT_FOUND:         "Vendor Not Found",
 };
 
 function ResolveDialog({ exceptionId, onSuccess }: { exceptionId: string; onSuccess: () => void }) {

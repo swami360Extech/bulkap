@@ -350,6 +350,7 @@ enum ExceptionType {
   PERIOD_CLOSED
   LOW_CONFIDENCE_EXTRACTION
   ORACLE_IMPORT_ERROR
+  VENDOR_NOT_FOUND
 }
 
 enum ExceptionSeverity {
